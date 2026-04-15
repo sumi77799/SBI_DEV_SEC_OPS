@@ -6,11 +6,21 @@ Java 21 -
 https://www.oracle.com/in/java/technologies/downloads/#jdk21-windows
 
 Maven - 
-
 https://maven.apache.org/download.cgi 
 
-
 Eclipse 
+https://www.eclipse.org/downloads/download.php?file=/technology/epp/downloads/release/2026-03/R/eclipse-jee-2026-03-R-win32-x86_64.zip
+
+VS code - 
+https://code.visualstudio.com/download
+
+--- install these apps --- 
+git - 
+https://git-scm.com/install/
+
+
+Docker Desktop - 
+https://www.docker.com/products/docker-desktop/ 
 
 
 
