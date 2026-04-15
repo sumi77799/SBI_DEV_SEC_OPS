@@ -7708,3 +7708,4 @@ org.springframework.web.servlet.resource.NoResourceFoundException: No static res
 2026-04-15T11:38:24.332+05:30  WARN 11636 --- [restartedMain] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
 2026-04-15T11:38:25.024+05:30  INFO 11636 --- [restartedMain] com.sbi.ems.App                          : Started App in 2.764 seconds (process running for 769.203)
 2026-04-15T11:38:25.027+05:30  INFO 11636 --- [restartedMain] com.sbi.ems.App                          : SBI EMS started. Navigate to /swagger-ui.html
+2026-04-15T12:13:08.504+05:30  WARN 11636 --- [HikariPool-2 housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-2 - Thread starvation or clock leap detected (housekeeper delta=1m14s706ms947µs100ns).
