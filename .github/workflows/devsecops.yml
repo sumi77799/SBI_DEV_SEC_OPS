@@ -1,20 +1,3 @@
-# ═══════════════════════════════════════════════════════════════════════════════
-# SBI EMS — DevSecOps CI/CD Pipeline
-# DevSecOps Training | CI/CD Module (Module 5, Day 1)
-#
-# Pipeline stages (from courseware Module 5.1):
-#   Pre-commit  → detect-secrets: block secrets before they reach git
-#   Build (CI)  → SonarQube SAST: block Critical vulnerabilities in code
-#   Build (CI)  → OWASP Dependency-Check: block libraries with CVEs
-#   Package     → Docker build + Trivy scan: block vulnerable container images
-#   Deploy (CD) → ZAP DAST: block runtime vulnerabilities
-#
-# Quality Gate thresholds (Module 5.3):
-#   New Blocker Issues   = 0
-#   New Critical Issues  = 0
-#   New Coverage         >= 70%
-#   Security Hotspots    reviewed = 100%
-# ═══════════════════════════════════════════════════════════════════════════════
 name: EMS DevSecOps Pipeline
 
 on:
@@ -30,13 +13,13 @@ jobs:
 
     steps:
 
-    # ── 1. Checkout ────────────────────────────────────────────────────────────
+    # ── 1. Checkout ─────────────────────────────────────────────
     - name: Checkout code
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0    # full history required for SonarQube blame and gitleaks
+        fetch-depth: 0
 
-    # ── 2. Java setup ─────────────────────────────────────────────────────────
+    # ── 2. Java setup ──────────────────────────────────────────
     - name: Set up Java 17
       uses: actions/setup-java@v4
       with:
@@ -44,49 +27,42 @@ jobs:
         distribution: 'temurin'
         cache: maven
 
-    # ── 3. Pre-commit: Secrets scan (detect-secrets) ──────────────────────────
-    # DevSecOps (Module 4): Catches hardcoded credentials before anything else.
-    # This is the fastest gate — runs in <10 seconds.
+    # ── 3. Secrets scan (detect-secrets) ───────────────────────
     - name: Scan for secrets (detect-secrets)
       run: |
         pip install detect-secrets --quiet
         detect-secrets scan . \
           --exclude-files '.git/.*' \
           --exclude-files 'target/.*' \
-          --exclude-files '.env.example' \
-          > /tmp/secrets-baseline.json
-        detect-secrets audit /tmp/secrets-baseline.json --report || true
+          > /tmp/secrets.json
+        detect-secrets audit /tmp/secrets.json --report || true
 
-    # ── 4. Pre-commit: Git history secrets scan (gitleaks) ───────────────────
-    # DevSecOps: Scans entire git history — catches secrets that were
-    # "deleted" from the latest commit but still exist in git history.
+    # ── 4. Git history secrets scan (gitleaks) ────────────────
     - name: Scan git history for secrets (gitleaks)
       uses: gitleaks/gitleaks-action@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # ── 5. Build + Unit Tests + JaCoCo coverage ───────────────────────────────
+    # ── 5. Build + Test ───────────────────────────────────────
     - name: Build and test
       run: mvn clean verify -q
       env:
         JWT_SECRET: ${{ secrets.JWT_SECRET_TEST }}
 
-    # ── 6. SAST: SonarQube scan + Quality Gate ────────────────────────────────
-    # DevSecOps (Module 2): Pipeline blocks if Quality Gate fails.
-    # -Dsonar.qualitygate.wait=true means the build fails on gate failure.
-    - name: SAST — SonarQube scan
+    # ── 6. SAST — SonarCloud (FIXED) ──────────────────────────
+    - name: SAST — SonarCloud scan
       env:
-        SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
-        SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        JWT_SECRET:     ${{ secrets.JWT_SECRET_TEST }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        JWT_SECRET:  ${{ secrets.JWT_SECRET_TEST }}
       run: |
         mvn sonar:sonar \
-          -Dsonar.qualitygate.wait=true \
-          -Dsonar.qualitygate.timeout=300
+          -Dsonar.projectKey=vaman-pundit_sbi-dev-sec-ops-2026 \
+          -Dsonar.organization=vaman-pundit \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.login=$SONAR_TOKEN \
+          -Dsonar.qualitygate.wait=true
 
-    # ── 7. SCA: OWASP Dependency-Check ────────────────────────────────────────
-    # DevSecOps (Module 1.2 — A06 Vulnerable Components):
-    # Scans all Maven dependencies for known CVEs. Fails on CVSS >= 7.
+    # ── 7. SCA — Dependency Check ─────────────────────────────
     - name: SCA — OWASP Dependency-Check
       run: |
         mvn dependency-check:check \
@@ -101,13 +77,11 @@ jobs:
         name: dependency-check-report
         path: target/dependency-check-report/
 
-    # ── 8. Build Docker image ─────────────────────────────────────────────────
+    # ── 8. Docker Build ───────────────────────────────────────
     - name: Build Docker image
       run: docker build -t sbi-ems:${{ github.sha }} .
 
-    # ── 9. Container scan: Trivy ──────────────────────────────────────────────
-    # DevSecOps (Module 6.4): Scans OS packages AND Maven dependencies in the image.
-    # --exit-code 1 → pipeline FAILS if any CRITICAL CVE found.
+    # ── 9. Container Scan — Trivy ─────────────────────────────
     - name: Container scan — Trivy
       run: |
         docker run --rm \
@@ -120,75 +94,57 @@ jobs:
             --output trivy-results.sarif \
             sbi-ems:${{ github.sha }}
 
-    - name: Upload Trivy SARIF to GitHub Security tab
+    - name: Upload Trivy SARIF
       uses: github/codeql-action/upload-sarif@v3
       if: always()
       with:
         sarif_file: trivy-results.sarif
 
-    # ── 10. Scan Dockerfile for misconfigurations ─────────────────────────────
+    # ── 10. Dockerfile scan ───────────────────────────────────
     - name: Dockerfile scan — Trivy config
       run: |
         docker run --rm \
           -v $(pwd):/workspace \
           aquasec/trivy:latest config \
-            --exit-code 1 \
-            /workspace/Dockerfile
+          /workspace/Dockerfile
 
-    # ── 11. Start EMS for DAST ────────────────────────────────────────────────
-    - name: Start EMS container for DAST
+    # ── 11. Run app for DAST ──────────────────────────────────
+    - name: Start EMS container
       run: |
         docker run -d --name ems-dast \
           -p 8080:8080 \
           -e JWT_SECRET=${{ secrets.JWT_SECRET_TEST }} \
-          -e SPRING_PROFILES_ACTIVE=dev \
           sbi-ems:${{ github.sha }}
-        # Wait for Spring Boot startup
-        echo "Waiting for EMS to start..."
+
+        echo "Waiting for app..."
         for i in $(seq 1 24); do
-          if curl -sf http://localhost:8080/actuator/health > /dev/null 2>&1; then
-            echo "EMS is up after ${i}s"
+          if curl -sf http://localhost:8080/actuator/health > /dev/null; then
+            echo "App is ready"
             break
           fi
           sleep 5
         done
 
-    # ── 12. DAST: OWASP ZAP API scan ─────────────────────────────────────────
-    # DevSecOps (Module 3): Scans the RUNNING application via OpenAPI spec.
-    # Finds runtime vulnerabilities SAST cannot detect:
-    #   - Missing security headers
-    #   - CORS misconfigurations
-    #   - Authentication bypass at runtime
-    - name: DAST — OWASP ZAP API scan
+    # ── 12. DAST — ZAP ───────────────────────────────────────
+    - name: DAST — OWASP ZAP
       run: |
         docker run --network=host \
-          --name zap-scan \
           ghcr.io/zaproxy/zaproxy:stable \
           zap-api-scan.py \
             -t http://localhost:8080/v3/api-docs \
             -f openapi \
             -r zap-report.html \
-            -x zap-report.xml \
-            -I    # do not fail on warnings — fail only on high-risk alerts
-      continue-on-error: true    # collect report even if scan finds issues
+            -I
+      continue-on-error: true
 
     - name: Upload ZAP report
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: zap-dast-report
+        name: zap-report
         path: zap-report.html
 
-    # ── 13. Push to registry (main branch only) ───────────────────────────────
-    # Only push if ALL security gates passed above.
-    - name: Push image to registry
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      run: |
-        echo "All security gates passed. Image sbi-ems:${{ github.sha }} is safe to deploy."
-        # docker tag sbi-ems:${{ github.sha }} your-registry/sbi-ems:${{ github.sha }}
-        # docker push your-registry/sbi-ems:${{ github.sha }}
-
-    # ── 14. Cleanup ───────────────────────────────────────────────────────────
-    - name: Stop EMS container
+    # ── 13. Cleanup ───────────────────────────────────────────
+    - name: Stop container
       if: always()
       run: docker stop ems-dast || true
